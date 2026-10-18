@@ -523,6 +523,10 @@ mod test {
 
     #[test]
     fn interval_sin_cos() {
+        use simba::scalar::ComplexField;
+        // Enhanced determinism selects simba's libm backend. Sample endpoints
+        // through that same backend; host intrinsic trigonometry may round
+        // the last bit differently from the interval being checked.
         let a = core::f32::consts::PI / 6.0;
         let b = core::f32::consts::FRAC_PI_2 + core::f32::consts::PI / 6.0;
         let c = core::f32::consts::PI + core::f32::consts::PI / 6.0;
@@ -534,26 +538,26 @@ mod test {
             // Test sinus.
             assert_eq!(
                 Interval(a + *shift, b + *shift).sin(),
-                Interval((a + *shift).sin(), 1.0)
+                Interval(ComplexField::sin(a + *shift), 1.0)
             );
             assert_eq!(
                 Interval(a + *shift, c + *shift).sin(),
-                Interval((c + *shift).sin(), 1.0)
+                Interval(ComplexField::sin(c + *shift), 1.0)
             );
             assert_eq!(Interval(a + *shift, d + *shift).sin(), Interval(-1.0, 1.0));
 
             // Test cosinus.
             assert_eq!(
                 Interval(a + *shift, b + *shift).cos(),
-                Interval((b + *shift).cos(), (a + *shift).cos())
+                Interval(ComplexField::cos(b + *shift), ComplexField::cos(a + *shift))
             );
             assert_eq!(
                 Interval(a + *shift, c + *shift).cos(),
-                Interval(-1.0, (a + *shift).cos())
+                Interval(-1.0, ComplexField::cos(a + *shift))
             );
             assert_eq!(
                 Interval(a + *shift, d + *shift).cos(),
-                Interval(-1.0, (a + *shift).cos())
+                Interval(-1.0, ComplexField::cos(a + *shift))
             );
         }
     }

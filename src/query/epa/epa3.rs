@@ -448,10 +448,32 @@ impl EPA {
         }
 
         if simplex.dimension() == 0 {
-            let mut n: Vector = Vector::ZERO;
-            n[1] = 1.0;
-            return Some((Vector::ZERO, Vector::ZERO, n));
-        } else if simplex.dimension() == 3 {
+            // A touching CSO vertex retains two real shape witnesses. Enrich
+            // it with a distinct support vertex so EPA can determine a contact
+            // normal; zero witnesses would incorrectly refer to the origins.
+            let candidates = [
+                Vector::X,
+                Vector::Y,
+                Vector::Z,
+                -Vector::X,
+                -Vector::Y,
+                -Vector::Z,
+            ];
+            let separation = gjk::eps_tol();
+            let bootstrap = candidates.iter().find_map(|direction| {
+                let point = CsoPoint::from_shapes(pos12, g1, g2, *direction);
+                ((point.point - self.vertices[0].point).length_squared() > separation * separation)
+                    .then_some(point)
+            });
+            match bootstrap {
+                Some(point) => self.vertices.push(point),
+                // A singleton CSO has no uniquely determined contact normal.
+                // Returning no result keeps that degeneracy explicit.
+                None => return None,
+            }
+        }
+
+        if simplex.dimension() == 3 {
             let dp1 = self.vertices[1] - self.vertices[0];
             let dp2 = self.vertices[2] - self.vertices[0];
             let dp3 = self.vertices[3] - self.vertices[0];
@@ -508,7 +530,7 @@ impl EPA {
                 return None;
             }
         } else {
-            if simplex.dimension() == 1 {
+            if self.vertices.len() == 2 {
                 let dpt = self.vertices[1] - self.vertices[0];
 
                 crate::math::orthonormal_subspace_basis(&[dpt], |dir| {

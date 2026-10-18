@@ -76,7 +76,12 @@ impl VoronoiSimplex {
                 let ap = pt - self.vertices[0];
                 let n = ab.cross(ac).normalize();
 
-                if n.dot(ap).abs() < gjk::eps_tol() {
+                // The support coordinates determine dot-product roundoff.
+                // Do not admit a tetrahedron whose height is below that
+                // resolution: its face-side tests cannot classify the origin
+                // reliably, even when an absolute machine epsilon is smaller.
+                let scale = self.max_sq_len().sqrt().max(pt.point.length()).max(1.0);
+                if n.dot(ap).abs() < gjk::eps_tol() * scale {
                     return false;
                 }
             }
