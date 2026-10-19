@@ -110,6 +110,36 @@ fn touching_triangle_cuboid_witnesses_belong_to_their_shapes() {
 fn check_triangle_cylinder(name: &str, triangle: Triangle, cylinder: Cylinder, pose: Pose) {
     use parry3d_f64::query::{DefaultQueryDispatcher, QueryDispatcher};
     use parry3d_f64::shape::Shape;
+    for swapped in [false, true] {
+        let result = if swapped {
+            DefaultQueryDispatcher.contact(&pose.inverse(), &cylinder, &triangle, f64::MAX)
+        } else {
+            DefaultQueryDispatcher.contact(&pose, &triangle, &cylinder, f64::MAX)
+        };
+        assert!(result.unwrap().is_some(), "raw {name} swapped={swapped}");
+    }
+    for i in 0..512 {
+        let jitter = Vector::new(
+            ((i * 29) % 101) as f64 - 50.0,
+            ((i * 47) % 103) as f64 - 51.0,
+            ((i * 67) % 107) as f64 - 53.0,
+        ) * 1e-6;
+        let perturbed = Pose::from_parts(
+            pose.translation + jitter,
+            (Rotation::from_scaled_axis(jitter) * pose.rotation).normalize(),
+        );
+        for swapped in [false, true] {
+            let result = if swapped {
+                DefaultQueryDispatcher.contact(&perturbed.inverse(), &cylinder, &triangle, f64::MAX)
+            } else {
+                DefaultQueryDispatcher.contact(&perturbed, &triangle, &cylinder, f64::MAX)
+            };
+            assert!(
+                result.unwrap().is_some(),
+                "perturbed {name} {i} swapped={swapped} pose={perturbed:?}"
+            );
+        }
+    }
     // Equivalent shape-local translations must not change contact existence.
     for origin in [
         Vector::ZERO,
@@ -238,9 +268,10 @@ fn thin_tetrahedron_separating_face_survives_simplex_reduction() {
     ];
     let mut simplex = VoronoiSimplex::new();
     simplex.reset(CsoPoint::single_point(vertices[0]));
-    for vertex in &vertices[1..] {
+    for vertex in &vertices[1..3] {
         assert!(simplex.add_point(CsoPoint::single_point(*vertex)));
     }
+    let _ = simplex.add_point(CsoPoint::single_point(vertices[3]));
     let projection = simplex.project_origin_and_reduce();
     assert!(simplex.dimension() < 3);
     assert!(
@@ -252,4 +283,63 @@ fn thin_tetrahedron_separating_face_survives_simplex_reduction() {
         witness += simplex.point(i).point * simplex.proj_coord(i);
     }
     assert!((projection - witness).length() < 1e-12);
+}
+
+#[test]
+fn thin_tetrahedron_orientation_is_certified_before_admission() {
+    use parry3d_f64::math::{Rotation as R, Vector as V};
+    check_triangle_cylinder(
+        "new-ramp-E",
+        Triangle::new(
+            V::new(-7., 0.5016427040100098, -79.576904296875),
+            V::new(7., 0.5324037075042725, -79.77452087402344),
+            V::new(-7., 0.5324037075042725, -79.77452087402344),
+        ),
+        Cylinder::new(0.125, 0.34),
+        Pose::from_parts(
+            V::new(-1.3389073334149622, 0.8489021723808553, -79.59256907073484),
+            R::from_xyzw(
+                0.349529194453555,
+                0.2929948450272693,
+                0.6110666672649717,
+                -0.6469782772008453,
+            ),
+        ),
+    );
+    check_triangle_cylinder(
+        "new-ramp-D",
+        Triangle::new(
+            V::new(-7., 5.423519134521484, -91.44674682617188),
+            V::new(7., 5.548860549926758, -91.60259246826172),
+            V::new(-7., 5.548860549926758, -91.60259246826172),
+        ),
+        Cylinder::new(0.125, 0.34),
+        Pose::from_parts(
+            V::new(-1.569776253289899, 5.725687472224377, -91.28046950137214),
+            R::from_xyzw(
+                -0.22591651207200394,
+                -0.23557593896374737,
+                0.6670403913004325,
+                -0.6697184398684268,
+            ),
+        ),
+    );
+    check_triangle_cylinder(
+        "ramp-F",
+        Triangle::new(
+            V::new(-7., 9.284912109375, -95.20088958740234),
+            V::new(7., 9.445323944091797, -95.32034301757813),
+            V::new(-7., 9.445323944091797, -95.32034301757813),
+        ),
+        Cylinder::new(0.15, 0.34),
+        Pose::from_parts(
+            V::new(-3.6360507686197754, 9.515113876532869, -94.94711124935618),
+            R::from_xyzw(
+                0.04134032864492792,
+                0.01215388708332068,
+                0.6897488709149054,
+                -0.722765352882876,
+            ),
+        ),
+    );
 }

@@ -43,3 +43,10 @@ Regression coverage includes the recorded offset-terrain and two ramp wheel
 poses, both shape orders, equivalent local translations, a prediction smaller
 than the measured gap, and the exact thin simplex. The original implementation
 fails the ramp regression; the corrected implementation passes it.
+
+The tetrahedron admission predicate also bounds determinant roundoff by the
+sum of its absolute products. An uncertified orientation stays on the prior
+simplex instead of admitting inconsistent face orientations. Three further
+ramp poses reproduced this cancellation; the regression checks all six recorded
+triangle/cylinder poses in both orders and 512 nearby translations/rotations
+per pose (6,144 neighborhood queries), alongside local-frame equivalence.
