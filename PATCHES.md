@@ -29,3 +29,17 @@ The interval trigonometry test compares endpoints using the configured simba
 backend, preserving exact assertions under enhanced determinism. Its previous
 host-intrinsic expectation also fails on unmodified 0.27 by one rounding bit;
 the production interval implementation is unchanged.
+
+## Thin tetrahedron separation (Roadster ramp)
+
+GJK reduces a tetrahedron by testing its four face half-spaces and projecting
+exterior native triangle features. The previous edge Voronoi-region predicates
+could disagree on a thin tetrahedron and return an interior classification for
+separated shapes. EPA then received a non-enclosing simplex and returned no
+contact geometry. The correction retains native support witnesses and does not
+retry with different seeds or synthesize a contact normal.
+
+Regression coverage includes the recorded offset-terrain and two ramp wheel
+poses, both shape orders, equivalent local translations, a prediction smaller
+than the measured gap, and the exact thin simplex. The original implementation
+fails the ramp regression; the corrected implementation passes it.

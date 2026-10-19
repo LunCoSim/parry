@@ -188,13 +188,53 @@ impl VoronoiSimplex {
             proj.point
         } else {
             assert!(self.dim == 3);
-            let (proj, location) = Tetrahedron::new(
-                self.vertices[0].point,
-                self.vertices[1].point,
-                self.vertices[2].point,
-                self.vertices[3].point,
-            )
-            .project_local_point_and_get_location(Vector::ZERO, true);
+            // Test the four face half-spaces directly. Edge Voronoi-region
+            // predicates can disagree on a very thin tetrahedron, incorrectly
+            // reporting the origin inside even with a separating face. GJK
+            // then sends separated shapes to EPA, which cannot expand that
+            // non-enclosing simplex. Project each exterior face and keep the
+            // closest native triangle feature instead.
+            let faces = [[0, 1, 2, 3], [0, 1, 3, 2], [0, 2, 3, 1], [1, 2, 3, 0]];
+            let edges = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]];
+            let mut closest = None;
+            for (face_id, [a, b, c, opposite]) in faces.into_iter().enumerate() {
+                let pa = self.vertices[a].point;
+                let triangle = Triangle::new(pa, self.vertices[b].point, self.vertices[c].point);
+                let normal = (triangle.b - pa).cross(triangle.c - pa);
+                let side = normal.dot(-pa);
+                let interior = normal.dot(self.vertices[opposite].point - pa);
+                if side == 0.0 || side.is_sign_positive() == interior.is_sign_positive() {
+                    continue;
+                }
+                let (projection, feature) =
+                    triangle.project_local_point_and_get_location(Vector::ZERO, true);
+                let indices = [a, b, c];
+                let location = match feature {
+                    TrianglePointLocation::OnVertex(i) => {
+                        TetrahedronPointLocation::OnVertex(indices[i as usize] as u32)
+                    }
+                    TrianglePointLocation::OnEdge(i, coords) => {
+                        let pair = [[a, b], [b, c], [a, c]][i as usize];
+                        let edge = edges.iter().position(|edge| *edge == pair).unwrap();
+                        TetrahedronPointLocation::OnEdge(edge as u32, coords)
+                    }
+                    TrianglePointLocation::OnFace(_, coords) => {
+                        TetrahedronPointLocation::OnFace(face_id as u32, coords)
+                    }
+                    TrianglePointLocation::OnSolid => unreachable!(),
+                };
+                let distance = projection.point.length_squared();
+                if closest.as_ref().is_none_or(|(d, _, _)| distance < *d) {
+                    closest = Some((distance, projection, location));
+                }
+            }
+            let (proj, location) = closest.map_or(
+                (
+                    crate::query::PointProjection::new(true, Vector::ZERO),
+                    TetrahedronPointLocation::OnSolid,
+                ),
+                |(_, projection, location)| (projection, location),
+            );
 
             match location {
                 TetrahedronPointLocation::OnVertex(i) => {
