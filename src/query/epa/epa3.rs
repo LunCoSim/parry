@@ -151,17 +151,16 @@ impl Face {
 
     pub fn can_be_seen_by(&self, vertices: &[CsoPoint], point: usize, opp_pt_id: usize) -> bool {
         let p0 = &vertices[self.pts[opp_pt_id]].point;
-        let p1 = &vertices[self.pts[(opp_pt_id + 1) % 3]].point;
-        let p2 = &vertices[self.pts[(opp_pt_id + 2) % 3]].point;
         let pt = &vertices[point].point;
 
         // NOTE: it is important that we return true for the case where
         // the dot product is zero. This is because degenerate faces will
         // have a zero normal, causing the dot product to be zero.
-        // So return true for these case will let us skip the triangle
-        // during silhouette computation.
+        // So return true for these cases to skip the triangle during
+        // silhouette computation. A thin triangle connecting this edge to
+        // the new point does not make a back-facing face visible: deleting
+        // it for that reason can erase the whole hull near grazing contact.
         (*pt - *p0).dot(self.normal) >= -gjk::eps_tol()
-            || Triangle::new(*p1, *p2, *pt).is_affinely_dependent()
     }
 }
 
@@ -757,5 +756,42 @@ impl EPA {
             assert!(adj2.adj[(opp_pt_id2 + 1) % 3] == i);
             assert!(adj3.adj[(opp_pt_id3 + 1) % 3] == i);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn thin_connecting_triangle_does_not_delete_a_back_facing_face() {
+        let vertices = [
+            Vector::ZERO,
+            Vector::new(1.0e-14, 0.0, 0.0),
+            Vector::Y,
+            Vector::new(0.5e-14, 0.0, -0.01),
+        ]
+        .map(CsoPoint::single_point);
+        let face = Face::new_with_proj(&vertices, [1.0, 0.0, 0.0], [0, 1, 2], [0; 3]);
+        assert!(
+            Triangle::new(vertices[0].point, vertices[1].point, vertices[3].point)
+                .is_affinely_dependent()
+        );
+        assert!(!face.can_be_seen_by(&vertices, 3, 2));
+    }
+
+    #[test]
+    fn coplanar_and_degenerate_faces_remain_visible_to_silhouette_traversal() {
+        let vertices = [
+            Vector::ZERO,
+            Vector::X,
+            Vector::Y,
+            Vector::new(0.5, 0.5, 0.0),
+        ]
+        .map(CsoPoint::single_point);
+        let face = Face::new_with_proj(&vertices, [1.0, 0.0, 0.0], [0, 1, 2], [0; 3]);
+        assert!(face.can_be_seen_by(&vertices, 3, 2));
+        let degenerate = Face::new_with_proj(&vertices, [1.0, 0.0, 0.0], [0, 0, 0], [0; 3]);
+        assert!(degenerate.can_be_seen_by(&vertices, 3, 2));
     }
 }

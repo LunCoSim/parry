@@ -343,3 +343,92 @@ fn thin_tetrahedron_orientation_is_certified_before_admission() {
         ),
     );
 }
+
+#[test]
+fn finite_cuboid_cylinder_grazing_retains_boundary_seed_witnesses() {
+    use parry3d_f64::query::{
+        details::contact_support_map_support_map_with_params,
+        gjk::{GJKResult, VoronoiSimplex},
+    };
+    let cuboid = Cuboid::new(Vector::new(
+        0.05999999865889549,
+        0.05999999865889549,
+        0.6000000238418579,
+    ));
+    let cylinder = Cylinder::new(0.08, 0.08);
+    let grazing = Pose::from_parts(
+        Vector::new(
+            0.16306899983625828,
+            -0.08162453220489181,
+            -0.09162967561523161,
+        ),
+        Rotation::from_xyzw(
+            -0.513498818442081,
+            0.8384158405322302,
+            -0.15568288987202353,
+            0.09560690144711595,
+        ),
+    );
+    let outward = Vector::new(0.94255, -0.33406, 0.0).normalize();
+    for gap in [-1.0e-5, 0.0, 1.0e-5] {
+        let pose = Pose::from_parts(grazing.translation + outward * gap, grazing.rotation);
+        let boundary = (pose.translation
+            - cuboid.project_local_point(pose.translation, false).point)
+            .normalize();
+        for seed in [
+            None,
+            Some(boundary),
+            Some(Vector::X),
+            Some(Vector::Y),
+            Some(Vector::Z),
+            Some(pose.translation.normalize()),
+        ] {
+            for swapped in [false, true] {
+                let (first_shape, second_shape): (&dyn SupportMap, &dyn SupportMap) = if swapped {
+                    (&cylinder, &cuboid)
+                } else {
+                    (&cuboid, &cylinder)
+                };
+                let relative = if swapped { pose.inverse() } else { pose };
+                let direction = if swapped {
+                    seed.map(|v| relative.rotation * -v)
+                } else {
+                    seed
+                };
+                let result = contact_support_map_support_map_with_params(
+                    &relative,
+                    first_shape,
+                    second_shape,
+                    f64::MAX,
+                    &mut VoronoiSimplex::new(),
+                    direction,
+                );
+                let GJKResult::ClosestPoints(first, second, normal) = result else {
+                    panic!("finite grazing pair lost native witnesses: gap={gap:e} seed={seed:?} swapped={swapped}: {result:?}");
+                };
+                assert!(first.is_finite() && second.is_finite() && normal.is_finite());
+                assert!((normal.length() - 1.0).abs() < 1e-12);
+                let distance = (second - first).dot(normal);
+                assert!(
+                    (distance - gap).abs() < 1e-7,
+                    "gap={gap:e} seed={seed:?} swapped={swapped} distance={distance:e}"
+                );
+                assert!((second - first - normal * distance).length() < 1e-7);
+                let (box_point, cylinder_point) = if swapped {
+                    (relative.inverse_transform_point(second), first)
+                } else {
+                    (first, pose.inverse_transform_point(second))
+                };
+                assert!(
+                    (cuboid.project_local_point(box_point, false).point - box_point).length()
+                        < 1e-7
+                );
+                assert!(
+                    (cylinder.project_local_point(cylinder_point, false).point - cylinder_point)
+                        .length()
+                        < 1e-7
+                );
+            }
+        }
+    }
+}
