@@ -5,6 +5,97 @@ use parry3d_f64::{
 };
 
 #[test]
+fn touching_large_cuboid_cylinder_retains_supporting_normal() {
+    use parry3d_f64::query::{ContactManifold, DefaultQueryDispatcher, PersistentQueryDispatcher};
+    use parry3d_f64::shape::{Shape, SharedShape};
+
+    let cylinder = SharedShape::cylinder(0.15, 0.34);
+    let axis = Pose::from_rotation(Rotation::from_rotation_z(-core::f64::consts::FRAC_PI_2));
+    // Captured near-tangent pose: the analytical floor clearance is 6.2e-13 m.
+    let tangent = Pose::from_parts(
+        Vector::new(-1.3184781679354403, 0.8402477450478824, -58.73657026013783),
+        Rotation::from_xyzw(
+            0.02337023784932594,
+            -0.018544458633876493,
+            -0.0012613193118391128,
+            -0.9995540726296082,
+        ),
+    );
+    for frame in [
+        Rotation::IDENTITY,
+        Rotation::from_rotation_z(core::f64::consts::FRAC_PI_2),
+        Rotation::from_rotation_x(core::f64::consts::FRAC_PI_2),
+    ] {
+        let up = frame * Vector::Y;
+        for extent in [100.0, 500.0, 50000.0] {
+            let half_extents = (frame * Vector::new(extent, 0.5, extent)).abs();
+            let floor = SharedShape::cuboid(half_extents.x, half_extents.y, half_extents.z);
+            for gap in [-1e-7, -1e-10, 0.0, 1e-12, 1e-10, 1e-7, 1e-4] {
+                let pose = Pose::from_parts(
+                    frame * (tangent.translation + Vector::Y * gap),
+                    frame * tangent.rotation,
+                );
+                for (shape, relative) in [
+                    (cylinder.clone(), pose * axis),
+                    (SharedShape::compound(vec![(axis, cylinder.clone())]), pose),
+                ] {
+                    for swapped in [false, true] {
+                        let (first, second, relative, normal): (
+                            &dyn Shape,
+                            &dyn Shape,
+                            Pose,
+                            Vector,
+                        ) = if swapped {
+                            (
+                                shape.as_ref(),
+                                floor.as_ref(),
+                                relative.inverse(),
+                                relative.rotation.inverse() * -up,
+                            )
+                        } else {
+                            (floor.as_ref(), shape.as_ref(), relative, up)
+                        };
+                        for prediction in [0.0, 0.001, 0.02, 1.0] {
+                            let mut manifolds = Vec::<ContactManifold<(), ()>>::new();
+                            DefaultQueryDispatcher
+                                .contact_manifolds(
+                                    &relative,
+                                    first,
+                                    second,
+                                    prediction,
+                                    &mut manifolds,
+                                    &mut None,
+                                )
+                                .unwrap();
+                            let contacts: Vec<_> = manifolds
+                                .iter()
+                                .filter(|m| !m.contacts().is_empty())
+                                .collect();
+                            assert!(!contacts.is_empty() || (prediction == 0.0 && gap >= 0.0),
+                            "lost floor contact: extent={extent} gap={gap:e} swapped={swapped} prediction={prediction}");
+                            for manifold in contacts {
+                                let actual =
+                                    manifold.subshape_pos1.unwrap_or(Pose::IDENTITY).rotation
+                                        * manifold.local_n1;
+                                assert!(actual.abs_diff_eq(normal, 1e-6),
+                                "extent={extent} gap={gap:e} swapped={swapped} prediction={prediction}: normal={actual:?}, expected={normal:?}");
+                                let min_dist = manifold
+                                    .contacts()
+                                    .iter()
+                                    .map(|c| c.dist)
+                                    .fold(f64::INFINITY, f64::min);
+                                assert!((min_dist - gap).abs() < 1e-7,
+                                "extent={extent} gap={gap:e} swapped={swapped}: min_dist={min_dist:e}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn coincident_nested_cylinders_intersect_in_both_orders() {
     let outer = Cylinder::new(50.0, 100.0);
     let inner = Cylinder::new(1.5, 1.0);

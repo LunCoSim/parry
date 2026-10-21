@@ -385,6 +385,9 @@ where
     // means separation, `~ 0` puts it on the CSO boundary (touching),
     // `< 0` bounds the penetration depth.
     let mut best_min_bound = -Real::max_value();
+    // Keep the supporting direction with its bound. Near touching, subtraction
+    // in the simplex projection can lose the direction of the witness gap.
+    let mut best_bound_dir = old_dir;
     // Largest CSO support magnitude seen, used to scale the tolerance below.
     let mut support_scale: Real = 0.0;
     let mut nb_perturbs = 0usize;
@@ -404,19 +407,24 @@ where
         }
 
         if max_bound >= old_max_bound {
+            let normal = if max_bound <= _eps_rel * support_scale {
+                best_bound_dir
+            } else {
+                old_dir
+            };
             if best_min_bound > 0.0 {
                 // Separation certified: the converged witnesses are the answer.
                 if exact_dist {
                     let (p1, p2) = result(simplex, true);
-                    return GJKResult::ClosestPoints(p1, p2, old_dir); // upper bounds inconsistencies
+                    return GJKResult::ClosestPoints(p1, p2, normal);
                 } else {
-                    return GJKResult::Proximity(old_dir);
+                    return GJKResult::Proximity(normal);
                 }
             } else if exact_dist && best_min_bound >= -_eps_rel * support_scale {
                 // Origin on the CSO boundary: the pair is touching, so the witnesses
                 // describe the contact.
                 let (p1, p2) = result(simplex, true);
-                return GJKResult::ClosestPoints(p1, p2, old_dir);
+                return GJKResult::ClosestPoints(p1, p2, normal);
             } else if nb_perturbs < MAX_PERTURBATIONS {
                 // Try slight perturbations to avoid getting stuck into a numerical ambiguity.
                 nb_perturbs += 1;
@@ -432,7 +440,10 @@ where
 
         assert!(min_bound.is_finite());
 
-        best_min_bound = best_min_bound.max(min_bound);
+        if min_bound > best_min_bound {
+            best_min_bound = min_bound;
+            best_bound_dir = dir;
+        }
         support_scale = support_scale.max(cso_point.point.length());
 
         if min_bound > max_dist {
@@ -450,16 +461,21 @@ where
 
         if !simplex.add_point(cso_point) {
             // See the stagnation branch above for how `best_min_bound` classifies a stall.
+            let normal = if max_bound <= _eps_rel * support_scale {
+                best_bound_dir
+            } else {
+                dir
+            };
             if best_min_bound > 0.0 {
                 if exact_dist {
                     let (p1, p2) = result(simplex, false);
-                    return GJKResult::ClosestPoints(p1, p2, dir);
+                    return GJKResult::ClosestPoints(p1, p2, normal);
                 } else {
-                    return GJKResult::Proximity(dir);
+                    return GJKResult::Proximity(normal);
                 }
             } else if exact_dist && best_min_bound >= -_eps_rel * support_scale {
                 let (p1, p2) = result(simplex, false);
-                return GJKResult::ClosestPoints(p1, p2, dir);
+                return GJKResult::ClosestPoints(p1, p2, normal);
             } else if nb_perturbs < MAX_PERTURBATIONS {
                 // The duplicate support point cannot enrich the simplex; jump back to
                 // the top of the loop where the stagnation branch will perturb `dir`.
